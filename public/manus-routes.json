@@ -1,0 +1,11 @@
+{
+  "routes": [
+    { "path": "/", "title": "SunSensor Eyewear" },
+    { "path": "/shop", "title": "Shop optical frames" },
+    { "path": "/product/:slug", "title": "Product details" },
+    { "path": "/staff", "title": "Staff catalog manager" },
+    { "path": "/cart", "title": "Your bag" },
+    { "path": "/checkout", "title": "Order inquiry" },
+    { "path": "/faq", "title": "Frequently asked questions" }
+  ]
+}
