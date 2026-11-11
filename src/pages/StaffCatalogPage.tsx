@@ -27,7 +27,7 @@ import {
   logoutStaff,
   publishStaffItem,
   StaffApiError,
-  startManusSignIn,
+  startGoogleSignIn,
   unpublishStaffItem,
   updateStaffItem,
   uploadStaffMedia,
@@ -366,7 +366,7 @@ export function StaffCatalogPage() {
     setBusy("auth");
     setErrorMessage("");
     try {
-      const authorizationUrl = await startManusSignIn();
+      const authorizationUrl = await startGoogleSignIn();
       const parsed = new URL(authorizationUrl, window.location.origin);
       if (parsed.protocol !== "https:" && parsed.origin !== window.location.origin) {
         throw new Error("The sign-in service returned an unsafe address.");
@@ -436,15 +436,15 @@ export function StaffCatalogPage() {
         {pageState === "signed-out" && (
           <section className="staff-auth-card">
             <div className="staff-auth-icon"><ShieldCheck size={24} /></div>
-            <div><span className="staff-eyebrow">STAFF SIGN-IN</span><h2>Sign in to manage listings</h2><p>Continue with Manus. Only accounts authorized by the shop can access this private editor.</p></div>
+            <div><span className="staff-eyebrow">STAFF SIGN-IN</span><h2>Sign in to manage listings</h2><p>Continue with Google. Only accounts authorized by the shop can access this private editor.</p></div>
             {errorMessage && <div className="staff-alert" role="alert"><AlertCircle size={17} />{errorMessage}</div>}
             <button className="staff-button staff-button-primary staff-auth-button" type="button" onClick={handleSignIn} disabled={busy === "auth"}>
-              {busy === "auth" ? <LoaderCircle className="staff-spin" size={18} /> : <ShieldCheck size={18} />} Continue with Manus
+              {busy === "auth" ? <LoaderCircle className="staff-spin" size={18} /> : <ShieldCheck size={18} />} Continue with Google
             </button>
           </section>
         )}
         {pageState === "unauthorized" && (
-          <section className="staff-state-card staff-state-card-error" role="alert"><AlertCircle size={22} /><div><h2>Staff access not authorized</h2><p>This Manus account does not have permission to manage the catalogue. Contact the shop administrator if you believe this is an error.</p><button className="staff-button staff-button-secondary" type="button" onClick={handleSignIn} disabled={busy === "auth"}>Try another Manus account</button></div></section>
+          <section className="staff-state-card staff-state-card-error" role="alert"><AlertCircle size={22} /><div><h2>Staff access not authorized</h2><p>This Google account does not have permission to manage the catalogue. Contact the shop administrator if you believe this is an error.</p><button className="staff-button staff-button-secondary" type="button" onClick={handleSignIn} disabled={busy === "auth"}>Try another Google account</button></div></section>
         )}
         {pageState === "error" && (
           <section className="staff-state-card staff-state-card-error" role="alert"><AlertCircle size={22} /><div><h2>Staff area unavailable</h2><p>{errorMessage}</p><button className="staff-button staff-button-secondary" type="button" onClick={retryLoad}>Try again</button></div></section>
