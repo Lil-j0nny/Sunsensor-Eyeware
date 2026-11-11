@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { requestStaff, staffFrom } from "./auth.js";
@@ -93,7 +93,7 @@ function safeFileName(value: unknown): string | null {
 }
 
 function stableUrl(storageKey: string): string {
-  return `/manus-storage/${storageKey}`;
+  return `/api/media/${storageKey.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function itemFromRows(rows: CatalogRow[]): Array<Record<string, unknown>> {
@@ -148,37 +148,70 @@ function sendBadRequest(response: Response, error: string): void {
   response.status(400).json({ error });
 }
 
-function requiredStorageBase(): string {
-  const value = process.env.MANUS_API_URL;
+function requiredStorageEnv(name: string): string {
+  const value = process.env[name];
   if (!value) throw new Error("Storage service unavailable");
-  return value.replace(/\/$/, "");
+  return value;
+}
+
+function awsEncode(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function awsSigningKey(secret: string, date: string, region: string): Buffer {
+  const hmac = (key: Buffer | string, value: string) => createHmac("sha256", key).update(value).digest();
+  const dateKey = hmac(`AWS4${secret}`, date);
+  const regionKey = hmac(dateKey, region);
+  const serviceKey = hmac(regionKey, "s3");
+  return hmac(serviceKey, "aws4_request");
 }
 
 async function presignedStorageUrl(operation: "put" | "get", storageKey: string): Promise<string> {
-  const apiKey = process.env.MANUS_API_KEY;
-  if (!apiKey) throw new Error("Storage service unavailable");
-  const endpoint = new URL(`${requiredStorageBase()}/v1/storage/presign/${operation}`);
-  endpoint.searchParams.set("path", storageKey);
-  const response = await fetch(endpoint, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error("Storage service unavailable");
-  const payload = await response.json() as Record<string, unknown>;
-  const nested = payload.data && typeof payload.data === "object"
-    ? payload.data as Record<string, unknown>
-    : payload;
-  const signedUrl = operation === "put" && typeof nested.uploadUrl === "string"
-    ? nested.uploadUrl
-    : typeof nested.url === "string" ? nested.url : "";
-  try {
-    const parsed = new URL(signedUrl);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("Invalid storage URL");
-  } catch {
-    throw new Error("Storage service unavailable");
-  }
-  return signedUrl;
+  const endpoint = new URL(requiredStorageEnv("S3_ENDPOINT"));
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) throw new Error("Storage service unavailable");
+  const bucket = requiredStorageEnv("S3_BUCKET");
+  const region = requiredStorageEnv("S3_REGION");
+  const accessKey = requiredStorageEnv("S3_ACCESS_KEY_ID");
+  const secret = requiredStorageEnv("S3_SECRET_ACCESS_KEY");
+  const style = process.env.S3_URL_STYLE || "path";
+  if (style !== "path" && style !== "virtual-host") throw new Error("Storage service unavailable");
+  const keyPath = storageKey.split("/").map(awsEncode).join("/");
+  const basePath = endpoint.pathname.replace(/\/$/, "");
+  const host = style === "virtual-host" ? `${bucket}.${endpoint.host}` : endpoint.host;
+  const canonicalUri = style === "virtual-host" ? `${basePath}/${keyPath}` : `${basePath}/${awsEncode(bucket)}/${keyPath}`;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const dateStamp = amzDate.slice(0, 8);
+  const scope = `${dateStamp}/${region}/s3/aws4_request`;
+  const params: Array<[string, string]> = [
+    ["X-Amz-Algorithm", "AWS4-HMAC-SHA256"],
+    ["X-Amz-Credential", `${accessKey}/${scope}`],
+    ["X-Amz-Date", amzDate],
+    ["X-Amz-Expires", operation === "put" ? "900" : "300"],
+    ["X-Amz-SignedHeaders", "host"],
+  ];
+  const canonicalQuery = params
+    .map(([name, value]) => [awsEncode(name), awsEncode(value)] as const)
+    .sort(([an, av], [bn, bv]) => an.localeCompare(bn) || av.localeCompare(bv))
+    .map(([name, value]) => `${name}=${value}`).join("&");
+  const canonicalRequest = [
+    operation === "put" ? "PUT" : "GET",
+    canonicalUri,
+    canonicalQuery,
+    `host:${host.toLowerCase()}\n`,
+    "host",
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256", amzDate, scope,
+    createHmac("sha256", Buffer.from("")).update(canonicalRequest).digest("hex"),
+  ].join("\n");
+  const signature = createHmac("sha256", awsSigningKey(secret, dateStamp, region)).update(stringToSign).digest("hex");
+  const url = new URL(endpoint.toString());
+  url.hostname = host;
+  url.pathname = canonicalUri;
+  url.search = `${canonicalQuery}&X-Amz-Signature=${signature}`;
+  return url.toString();
 }
 
 async function presignedPutUrl(storageKey: string): Promise<string> {
@@ -226,6 +259,19 @@ async function managedObjectMatches(
 }
 
 export function mountCatalogRoutes(app: Express, pool: Pool): void {
+  app.get(/^\/api\/media\/(.+)$/, async (request, response) => {
+    const storageKey = typeof request.params[0] === "string" ? request.params[0] : "";
+    if (!/^sunsensor\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp|gif|avif|mp4|webm|mov)$/i.test(storageKey)) {
+      response.status(404).end();
+      return;
+    }
+    try {
+      response.redirect(302, await presignedStorageUrl("get", storageKey));
+    } catch {
+      response.status(503).end();
+    }
+  });
+
   const staffOnly = requestStaff(pool);
 
   app.get("/api/catalog", async (_request, response) => {
