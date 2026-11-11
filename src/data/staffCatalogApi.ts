@@ -186,9 +186,9 @@ export async function deleteStaffMedia(itemId: string, mediaId: string): Promise
   );
 }
 
-export async function startManusSignIn(): Promise<string> {
+export async function startGoogleSignIn(): Promise<string> {
   const result = await requestJson<{ authorizationUrl: string }>(
-    "/api/auth/start",
+    "/api/auth/google/start",
     {
       method: "POST",
       body: JSON.stringify({ origin: window.location.origin }),
