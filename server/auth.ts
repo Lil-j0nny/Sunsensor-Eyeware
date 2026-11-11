@@ -123,7 +123,7 @@ async function verifyGoogleIdToken(idToken: string, expectedNonce: string): Prom
   const jwks = await jwksResponse.json() as { keys?: GoogleJwk[] };
   const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.use === "sig" && key.alg === "RS256");
   if (!jwk) throw new Error("Google signing key not found");
-  const key = createPublicKey({ key: jwk, format: "jwk" });
+  const key = createPublicKey({ key: jwk as never, format: "jwk" });
   const validSignature = verifySignature("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2], "base64url"));
   const clientId = requiredEnv("GOOGLE_CLIENT_ID");
   const audienceMatches = claims.aud === clientId || (Array.isArray(claims.aud) && claims.aud.includes(clientId));
