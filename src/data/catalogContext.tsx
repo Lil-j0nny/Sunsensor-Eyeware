@@ -110,7 +110,7 @@ function isReadyMedia(value: unknown): value is StaffCatalogMedia {
     typeof media.id === "string" &&
     (media.mediaType === "image" || media.mediaType === "video") &&
     typeof media.url === "string" &&
-    media.url.startsWith("/manus-storage/") &&
+    (media.url.startsWith("/api/media/") || media.url.startsWith("/manus-storage/")) &&
     media.uploadStatus === "ready" &&
     typeof media.contentType === "string" &&
     typeof media.fileName === "string"
